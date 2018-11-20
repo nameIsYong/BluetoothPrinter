@@ -10,7 +10,7 @@ import UIKit
 import CoreBluetooth
 
 class BaseManager: NSObject {
-
+    
     var command = Printer()
     var manager: CBCentralManager!
     var currentPeripheral:CBPeripheral?
@@ -37,119 +37,119 @@ class BaseManager: NSObject {
     }
     
 }
- 
-    extension BaseManager: CBCentralManagerDelegate {
-        func centralManagerDidUpdateState(_ central: CBCentralManager) {
+
+extension BaseManager: CBCentralManagerDelegate {
+    func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        
+        var message = "";
+        switch central.state {
+        case .unknown:
+            message = "蓝牙系统错误"
+        case .resetting:
+            message = "请重新开启手机蓝牙"
+        case .unsupported:
+            message = "该手机不支持蓝牙"
+        case .unauthorized:
+            message = "蓝牙验证失败"
+        case .poweredOff://蓝牙没开启，直接到设置
+            message = "蓝牙没有开启"
             
-            var message = "";
-            switch central.state {
-            case .unknown:
-                message = "蓝牙系统错误"
-            case .resetting:
-                message = "请重新开启手机蓝牙"
-            case .unsupported:
-                message = "该手机不支持蓝牙"
-            case .unauthorized:
-                message = "蓝牙验证失败"
-            case .poweredOff://蓝牙没开启，直接到设置
-               message = "蓝牙没有开启"
-                
-            case .poweredOn:
-                central.scanForPeripherals(withServices: nil, options: nil)
-            }
-            print(message)
+        case .poweredOn:
+            central.scanForPeripherals(withServices: nil, options: nil)
+        }
+        print(message)
+    }
+    
+    
+    public func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String : Any], rssi RSSI: NSNumber) {
+        
+        print("设备名-->"+(peripheral.name ?? ""))
+        let peripheralName = peripheral.name ?? ""
+        let contains = (self.currentScanName != nil) && peripheralName.contains(self.currentScanName!)
+        
+        if contains {
+            currentPeripheral = peripheral
+            central.connect(peripheral, options: nil)
+        }
+    }
+    
+    func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        central.stopScan()
+        
+        //蓝牙连接成功
+        if currentPeripheral != nil {
+            currentPeripheral!.delegate = self
+            currentPeripheral!.discoverServices([CBUUID(string: self.currentServiceUUID!)])
         }
         
-        
-        public func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String : Any], rssi RSSI: NSNumber) {
-           
-            print("设备名-->"+(peripheral.name ?? ""))
-            let peripheralName = peripheral.name ?? ""
-            let contains = (self.currentScanName != nil) && peripheralName.contains(self.currentScanName!)
-            
-            if contains {
-                currentPeripheral = peripheral
-                central.connect(peripheral, options: nil)
-            }
-        }
-        
-        func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-            central.stopScan()
-            
-             //蓝牙连接成功
-            if currentPeripheral != nil {
-                currentPeripheral!.delegate = self
-                currentPeripheral!.discoverServices([CBUUID(string: self.currentServiceUUID!)])
-            }
-     
     }
 }
-    extension BaseManager: CBPeripheralDelegate {
-        //发现服务
-        func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
-            print("当前currentServiceUUID-->"+(self.currentServiceUUID ?? ""))
-            for service in peripheral.services! {
-                print("寻找服务，服务有：\(service)"+"   id-->"+service.uuid.uuidString)
-                if service.uuid.uuidString == self.currentServiceUUID {
-                    peripheral.discoverCharacteristics(nil, for: service)
-                    print("找到当前服务了。。。。")
-                    break
-                }
+extension BaseManager: CBPeripheralDelegate {
+    //发现服务
+    func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+        print("当前currentServiceUUID-->"+(self.currentServiceUUID ?? ""))
+        for service in peripheral.services! {
+            print("寻找服务，服务有：\(service)"+"   id-->"+service.uuid.uuidString)
+            if service.uuid.uuidString == self.currentServiceUUID {
+                peripheral.discoverCharacteristics(nil, for: service)
+                print("找到当前服务了。。。。")
+                break
             }
         }
+    }
+    
+    //发现特征
+    func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
         
-        //发现特征
-        func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
+        for characteristic in service.characteristics! {
+            print("特征有\(characteristic)")
             
-            for characteristic in service.characteristics! {
-                print("特征有\(characteristic)")
-                
-                if characteristic.uuid.uuidString == self.currentWriteUUID {
-                    self.writeCharacteristic = characteristic
-                    print("-找到了写服务----\(characteristic)")
-                }
+            if characteristic.uuid.uuidString == self.currentWriteUUID {
+                self.writeCharacteristic = characteristic
+                print("-找到了写服务----\(characteristic)")
             }
         }
+    }
+    
+    ///发送指令给打印机
+    private func send(value:Data) {
         
-        ///发送指令给打印机
-        private func send(value:Data) {
-            
         currentPeripheral!.writeValue(value, for: writeCharacteristic, type: CBCharacteristicWriteType.withResponse)
-        }
+    }
+    
+    ///打印文字
+    func printText(_ str:String) {
         
-        ///打印文字
-        func printText(_ str:String) {
-
-            let enc = CFStringConvertEncodingToNSStringEncoding(UInt32(CFStringEncodings.GB_18030_2000.rawValue))
-            
-            ///这里一定要GB_18030_2000，测试过用utf-系列是乱码，踩坑了。
-            let data = str.data(using: String.Encoding(rawValue: enc), allowLossyConversion: false)
-            if data != nil{
-                sendCommand(data!)
-            }
-        }
-        ///发送指令
-        func sendCommand(_ data:Data) {
-            send(value: data)
-        }
+        let enc = CFStringConvertEncodingToNSStringEncoding(UInt32(CFStringEncodings.GB_18030_2000.rawValue))
         
-        ///测试打印
-        func testPrint() {
-            sendCommand(command.clear())
-            sendCommand(command.mergerPaper())
-            sendCommand(command.alignCenter())
-            printText("------------------")
-            sendCommand(command.nextLine(number: 1))
-            sendCommand(command.alignCenter())
-            sendCommand(command.nextLine(number: 1))
-            printText("这是测试标题OK?")
-            sendCommand(command.alignLeft())
-            printText("血糖:")
-            sendCommand(command.alignRight())
-            printText("90")
-            sendCommand(command.alignLeft())
-            printText("THIS IS CONTENT大了就发的垃圾发来得及发链接发的垃圾发的垃圾发链接发的垃圾发链接")
+        ///这里一定要GB_18030_2000，测试过用utf-系列是乱码，踩坑了。
+        let data = str.data(using: String.Encoding(rawValue: enc), allowLossyConversion: false)
+        if data != nil{
+            sendCommand(data!)
         }
+    }
+    ///发送指令
+    func sendCommand(_ data:Data) {
+        send(value: data)
+    }
+    
+    ///测试打印
+    func testPrint() {
+        sendCommand(command.clear())
+        sendCommand(command.mergerPaper())
+        sendCommand(command.alignCenter())
+        printText("------------------")
+        sendCommand(command.nextLine(number: 1))
+        sendCommand(command.alignCenter())
+        sendCommand(command.nextLine(number: 1))
+        printText("这是测试标题OK?")
+        sendCommand(command.alignLeft())
+        printText("血糖:")
+        sendCommand(command.alignRight())
+        printText("90")
+        sendCommand(command.alignLeft())
+        printText("THIS IS CONTENT大了就发的垃圾发来得及发链接发的垃圾发的垃圾发链接发的垃圾发链接")
+    }
 }
 
 
@@ -178,12 +178,12 @@ class Printer
     }
     
     ///打印空格
-    func printBlank(number:Int) -> [UInt8] {
+    func printBlank(number:Int) -> Data {
         var foo:[UInt8] = []
         for _ in 0..<number {
             foo.append(SP)
         }
-        return foo
+        return Data.init(bytes:foo)
     }
     
     ///换行
@@ -196,39 +196,39 @@ class Printer
     }
     
     ///绘制下划线
-    func printUnderline() -> [UInt8] {
+    func printUnderline() -> Data {
         var foo:[UInt8] = []
         foo.append(ESC)
         foo.append(45)
         foo.append(1)//一个像素
-        return foo
+        return Data.init(bytes:foo)
     }
     
     ///取消绘制下划线
-    func cancelUnderline() -> [UInt8] {
+    func cancelUnderline() -> Data {
         var foo:[UInt8] = []
         foo.append(ESC)
         foo.append(45)
-        foo.append(0)//0个像素
-        return foo
+        foo.append(0)
+        return Data.init(bytes:foo)
     }
     
     ///加粗文字
-    func boldOn() -> [UInt8] {
+    func boldOn() -> Data {
         var foo:[UInt8] = []
         foo.append(ESC)
         foo.append(69)
         foo.append(0xF)
-        return foo
+        return Data.init(bytes:foo)
     }
     
     ///取消加粗
-    func boldOff() -> [UInt8] {
+    func boldOff() -> Data {
         var foo:[UInt8] = []
         foo.append(ESC)
         foo.append(69)
         foo.append(0)
-        return foo
+        return Data.init(bytes:foo)
     }
     
     ///左对齐
@@ -247,17 +247,17 @@ class Printer
     }
     
     ///水平方向向右移动col列
-    func alignRight(col:UInt8) -> [UInt8] {
+    func alignRight(col:UInt8) -> Data {
         var foo:[UInt8] = []
         foo.append(ESC)
         foo.append(68)
         foo.append(col)
         foo.append(0)
-        return foo
+        return Data.init(bytes:foo)
     }
     
     ///字体变大为标准的n倍
-    func fontSize(font:Int8) -> [UInt8] {
+    func fontSize(font:Int8) -> Data {
         var realSize:UInt8 = 0
         switch font {
         case 1:
@@ -283,27 +283,27 @@ class Printer
         foo.append(GS)
         foo.append(33)
         foo.append(realSize)
-        return foo
+        return Data.init(bytes:foo)
     }
     
     ///进纸并全部切割
-    func feedPaperCutAll() -> [UInt8] {
+    func feedPaperCutAll() -> Data {
         var foo:[UInt8] = []
         foo.append(GS)
         foo.append(86)
         foo.append(65)
         foo.append(0)
-        return foo
+        return Data.init(bytes:foo)
     }
     
     ///进纸并切割（左边留一点不切）
-    func feedPaperCutPartial() -> [UInt8] {
+    func feedPaperCutPartial() -> Data {
         var foo:[UInt8] = []
         foo.append(GS)
         foo.append(86)
         foo.append(66)
         foo.append(0)
-        return foo
+        return Data.init(bytes:foo)
     }
     
     ///设置纸张间距为默认
